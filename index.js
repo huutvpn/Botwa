@@ -1,35 +1,66 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
-const kuis = require('./kuis');
-const cs = require('./cs');
-const admin = require('./admin');
+import makeWASocket, {
+  useMultiFileAuthState,
+  DisconnectReason
+} from "@whiskeysockets/baileys";
+import qrcode from "qrcode-terminal";
+import { Boom } from "@hapi/boom";
 
-const client = new Client({
-    authStrategy: new LocalAuth()
-});
+async function startBot() {
+  const { state, saveCreds } = await useMultiFileAuthState("session");
 
-client.on('qr', qr => {
-    qrcode.generate(qr, { small: true });
-});
+  const sock = makeWASocket({
+    auth: state,
+    printQRInTerminal: false
+  });
 
-client.on('ready', () => {
-    console.log('🤖 BOT SUPER AKTIF 24 JAM');
-});
+  sock.ev.on("creds.update", saveCreds);
 
-client.on('message', msg => {
-    const text = msg.body.toLowerCase();
+  sock.ev.on("connection.update", (update) => {
+    const { connection, lastDisconnect, qr } = update;
 
-    if (text === 'menu') {
-        msg.reply(
-`🤖 MENU BOT
-1️⃣ Kuis SD
-2️⃣ Info Sekolah
-3️⃣ CS / Jualan`
-        );
+    if (qr) {
+      qrcode.generate(qr, { small: true });
+      console.log("📱 Scan QR pakai WhatsApp");
     }
-    kuis(msg, text);
-    admin(msg, text);
-    cs(msg, text);
-});
 
-client.initialize();
+    if (connection === "close") {
+      const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
+      if (reason !== DisconnectReason.loggedOut) {
+        startBot();
+      }
+    }
+
+    if (connection === "open") {
+      console.log("✅ Bot WhatsApp Online!");
+    }
+  });
+
+  sock.ev.on("messages.upsert", async ({ messages }) => {
+    const msg = messages[0];
+    if (!msg.message || msg.key.fromMe) return;
+
+    const from = msg.key.remoteJid;
+    const text =
+      msg.message.conversation ||
+      msg.message.extendedTextMessage?.text ||
+      "";
+
+    if (text === "menu") {
+      await sock.sendMessage(from, {
+        text: `🤖 *BOT AUTO REPLY*
+1. menu
+2. halo
+3. info
+Ketik perintah di atas`
+      });
+    } 
+    else if (text === "halo") {
+      await sock.sendMessage(from, { text: "Halo juga 👋" });
+    } 
+    else if (text === "info") {
+      await sock.sendMessage(from, { text: "Ini bot WhatsApp siap pakai 🚀" });
+    }
+  });
+}
+
+startBot();
